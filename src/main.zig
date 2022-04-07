@@ -10,6 +10,7 @@ const SDLContext = struct {
     is_s_pressed: bool = false,
     is_up_pressed: bool = false,
     is_down_pressed: bool = false,
+    is_space_pressed: bool = false,
 
     const Rect = struct {
         x: i32,
@@ -17,6 +18,22 @@ const SDLContext = struct {
         w: i32,
         h: i32,
         color: Color,
+
+        // AABB collision between two rectangles
+        pub fn collidesWith(self: *const Rect, other: *const Rect) bool {
+            for ([_]i32{ self.x, self.x + self.w }) |x| {
+                for ([_]i32{ self.y, self.y + self.h }) |y| {
+                    if (x >= other.x and
+                        x <= other.x + other.w and
+                        y >= other.y and
+                        y <= other.y + other.h)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
     };
 
     const WIDTH: i32 = 800;
@@ -86,6 +103,8 @@ const SDLContext = struct {
 
     fn processEvents(self: *SDLContext) void {
         var event: sdl2.SDL_Event = undefined;
+        // reset every time
+        self.is_space_pressed = false;
         while (sdl2.SDL_PollEvent(&event) != 0) {
             switch (event.type) {
                 sdl2.SDL_KEYDOWN => switch (event.key.keysym.sym) {
@@ -94,6 +113,7 @@ const SDLContext = struct {
                     sdl2.SDLK_DOWN => self.is_down_pressed = true,
                     sdl2.SDLK_w => self.is_w_pressed = true,
                     sdl2.SDLK_s => self.is_s_pressed = true,
+                    sdl2.SDLK_SPACE => self.is_space_pressed = true,
                     else => {},
                 },
                 sdl2.SDL_KEYUP => switch (event.key.keysym.sym) {
@@ -107,6 +127,49 @@ const SDLContext = struct {
                 else => {},
             }
         }
+    }
+};
+
+const Vec2 = struct {
+    x: f32,
+    y: f32,
+
+    pub inline fn dot(self: *const Vec2, v: Vec2) f32 {
+        return self.x * v.x + self.y * v.y;
+    }
+
+    pub inline fn div(self: *const Vec2, s: f32) Vec2 {
+        return Vec2{
+            .x = self.x / s,
+            .y = self.y / s,
+        };
+    }
+
+    pub inline fn mult(self: *const Vec2, s: f32) Vec2 {
+        return Vec2{
+            .x = self.x * s,
+            .y = self.y * s,
+        };
+    }
+
+    pub inline fn sub(self: *const Vec2, v: Vec2) Vec2 {
+        return Vec2{
+            .x = self.x - v.x,
+            .y = self.y - v.y,
+        };
+    }
+
+    pub inline fn length(self: *const Vec2) f32 {
+        return std.math.sqrt(self.x * self.x + self.y * self.y);
+    }
+
+    pub inline fn normalized(self: *const Vec2) Vec2 {
+        return self.div(self.length());
+    }
+
+    /// n must be normalized
+    pub inline fn reflected(self: *const Vec2, n: Vec2) Vec2 {
+        return self.sub(n.mult(self.dot(n)).mult(2.0));
     }
 };
 
@@ -151,9 +214,17 @@ pub fn main() anyerror!void {
         },
     };
 
-    var player_vel: i32 = 10;
+    var ball_vel: Vec2 = .{
+        .x = 0.0,
+        .y = 0.0,
+    };
 
-    std.log.info("color as u32: {x:0>8}", .{player1.color.toU32()});
+    var player_vel: i32 = 10;
+    var player1_score: u8 = 0;
+    var player2_score: u8 = 0;
+    var paused: bool = true;
+
+    var rand = std.rand.DefaultPrng.init(@bitCast(u64, std.time.milliTimestamp())).random();
 
     while (context.is_open) {
         context.processEvents();
@@ -169,6 +240,53 @@ pub fn main() anyerror!void {
         }
         if (context.is_up_pressed) {
             player2.y = std.math.max(player2.y - player_vel, 0);
+        }
+        if (ball.x + ball.w >= SDLContext.WIDTH) {
+            // player2 loses
+            player1_score += 1;
+            std.log.info("player 1 scored a point! player1: {}, player2: {}", .{ player1_score, player2_score });
+            paused = true;
+            ball.x = SDLContext.WIDTH / 2 - @divTrunc(ball.w, 2);
+            ball.y = SDLContext.HEIGHT / 2 - @divTrunc(ball.h, 2);
+        }
+        if (ball.y + ball.h >= SDLContext.HEIGHT) {
+            // bounce
+            ball_vel = ball_vel.reflected(Vec2{ .x = 0, .y = -1 });
+        }
+        if (ball.x < 0) {
+            // player1 loses
+            player2_score += 1;
+            std.log.info("player 2 scored a point! player1: {}, player2: {}", .{ player1_score, player2_score });
+            paused = true;
+            ball.x = SDLContext.WIDTH / 2 - @divTrunc(ball.w, 2);
+            ball.y = SDLContext.HEIGHT / 2 - @divTrunc(ball.h, 2);
+        }
+        if (ball.y < 0) {
+            // bounce
+            ball_vel = ball_vel.reflected(Vec2{ .x = 0, .y = 1 });
+        }
+        // pedal collision
+        // player 1
+        if (ball.collidesWith(&player1)) {
+            if (ball_vel.x < 0) {
+                ball_vel = ball_vel.reflected(Vec2{ .x = 1, .y = 0 });
+            }
+        }
+        // player 2
+        if (ball.collidesWith(&player2)) {
+            if (ball_vel.x > 0) {
+                ball_vel = ball_vel.reflected(Vec2{ .x = -1, .y = 0 });
+            }
+        }
+        if (paused and context.is_space_pressed) {
+            ball_vel.x = rand.float(f32) - 0.5;
+            ball_vel.y = (rand.float(f32) - 0.5) * 0.3;
+            ball_vel = ball_vel.normalized().mult(7);
+            paused = false;
+        }
+        if (!paused) {
+            ball.x = @floatToInt(i32, @intToFloat(f32, ball.x) + ball_vel.x);
+            ball.y = @floatToInt(i32, @intToFloat(f32, ball.y) + ball_vel.y);
         }
         context.drawRect(&player1);
         context.drawRect(&player2);
