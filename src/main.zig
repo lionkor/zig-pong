@@ -22,6 +22,12 @@ const SDLContext = struct {
         r: u8,
         g: u8,
         b: u8,
+        pub fn toU32(self: *Color) u32 {
+            return (@intCast(u32, self.r) << 24) |
+                (@intCast(u32, self.g) << 16) |
+                (@intCast(u32, self.b) << 8) |
+                (255 << 0);
+        }
     };
 
     fn drawRect(self: *SDLContext, rect: *Rect) void {
@@ -31,7 +37,7 @@ const SDLContext = struct {
         sdl_rect.y = rect.y;
         sdl_rect.w = rect.w;
         sdl_rect.h = rect.h;
-        _ = sdl2.SDL_RenderDrawRect(self.renderer, &sdl_rect);
+        _ = sdl2.SDL_RenderFillRect(self.renderer, &sdl_rect);
         _ = sdl2.SDL_SetRenderDrawColor(self.renderer, 0, 0, 0, 255);
     }
 
@@ -99,16 +105,44 @@ pub fn main() anyerror!void {
         .w = 10,
         .h = 40,
         .color = .{
-            .r = 255,
-            .g = 0,
-            .b = 0,
+            .r = 0x00,
+            .g = 0x00,
+            .b = 0xff,
         },
     };
+
+    var player2: SDLContext.Rect = .{
+        .x = SDLContext.WIDTH - 15 - 10,
+        .y = SDLContext.HEIGHT / 2 - 20,
+        .w = 10,
+        .h = 40,
+        .color = .{
+            .r = 0xff,
+            .g = 0x00,
+            .b = 0x00,
+        },
+    };
+
+    var ball: SDLContext.Rect = .{
+        .x = SDLContext.WIDTH / 2 - 5,
+        .y = SDLContext.HEIGHT / 2 - 5,
+        .w = 10,
+        .h = 10,
+        .color = .{
+            .r = 0xff,
+            .g = 0xff,
+            .b = 0xff,
+        },
+    };
+
+    std.log.info("color as u32: {x:0>8}", .{player1.color.toU32()});
 
     while (context.is_open) {
         context.processEvents();
         context.renderClear();
         context.drawRect(&player1);
+        context.drawRect(&player2);
+        context.drawRect(&ball);
         context.renderPresent();
     }
 }
