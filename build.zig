@@ -14,6 +14,7 @@ pub fn build(b: *std.build.Builder) void {
     const exe = b.addExecutable("zig-pong", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
+    exe.linkage = .static;
     exe.linkLibC();
     exe.linkSystemLibrary("sdl2");
     exe.install();
