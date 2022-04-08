@@ -33,7 +33,7 @@ pub fn build(b: *std.build.Builder) void {
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
 
-    for ([_][]const u8{ "src/main.zig", "src/vec2.zig" }) |src| {
+    for ([_][]const u8{"src/Vec2.zig"}) |src| {
         const src_tests = b.addTest(src);
         src_tests.setTarget(target);
         src_tests.setBuildMode(mode);
