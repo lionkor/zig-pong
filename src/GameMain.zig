@@ -202,7 +202,7 @@ pub fn main() anyerror!void {
             } else {
                 try net.writePacket(Packet.make(.BallVel, .{ .x = 0, .y = 0 }));
             }
-            if (std.time.milliTimestamp() - last_ball_update > 15) {
+            if (std.time.milliTimestamp() - last_ball_update > 100) {
                 last_ball_update = std.time.milliTimestamp();
                 try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
             }
