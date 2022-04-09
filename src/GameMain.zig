@@ -11,7 +11,7 @@ const Pos = struct {
 
 var other_last_pos: i32 = 0;
 var ball_pos: Pos = .{ .x = 0, .y = 0 };
-var ball_vel: Vec2 = .{};
+var remote_ball_vel: Vec2 = .{};
 
 fn readThreadMain(net: *NetClient) !void {
     while (true) {
@@ -204,12 +204,8 @@ pub fn main() anyerror!void {
                 try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
             }
         } else {
-            if (std.math.absInt(ball.x - ball_pos.x) > 1) {
-                ball.x = ball_pos.x;
-            }
-            if (std.math.absInt(ball.y - ball_pos.y) > 1) {
-                ball.y = ball_pos.y;
-            }
+            ball.x = @floatToInt(i32, @intToFloat(f32, ball.x) + remote_ball_vel.x);
+            ball.y = @floatToInt(i32, @intToFloat(f32, ball.y) + remote_ball_vel.y);
         }
         context.drawRect(&player1);
         context.drawRect(&player2);
