@@ -152,6 +152,8 @@ pub fn main() anyerror!void {
                 paused = true;
                 ball.x = SDLContext.WIDTH / 2 - @divTrunc(ball.w, 2);
                 ball.y = SDLContext.HEIGHT / 2 - @divTrunc(ball.h, 2);
+                ball_vel.x = 0;
+                ball_vel.y = 0;
                 try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
             }
             if (ball.y + ball.h >= SDLContext.HEIGHT) {
@@ -166,6 +168,8 @@ pub fn main() anyerror!void {
                 paused = true;
                 ball.x = SDLContext.WIDTH / 2 - @divTrunc(ball.w, 2);
                 ball.y = SDLContext.HEIGHT / 2 - @divTrunc(ball.h, 2);
+                ball_vel.x = 0;
+                ball_vel.y = 0;
                 try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
             }
             if (ball.y < 0) {
