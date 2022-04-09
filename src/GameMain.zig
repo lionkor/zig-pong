@@ -1,6 +1,6 @@
 const std = @import("std");
-const Vec2 = @import("Vec2.zig");
-const SDLContext = @import("SDLContext.zig");
+const Vec2 = @import("game/Vec2.zig");
+const SDLContext = @import("game/SDLContext.zig");
 
 pub fn main() anyerror!void {
     var context = try SDLContext.init();
@@ -50,7 +50,7 @@ pub fn main() anyerror!void {
         .y = 0.0,
     };
 
-    var player_vel: i32 = 10;
+    var player_vel: i32 = 7;
     var player1_score: u8 = 0;
     var player2_score: u8 = 0;
     var paused: bool = true;
@@ -112,7 +112,7 @@ pub fn main() anyerror!void {
         if (paused and context.is_space_pressed) {
             ball_vel.x = rand.float(f32) - 0.5;
             ball_vel.y = (rand.float(f32) - 0.5) * 0.3;
-            ball_vel = ball_vel.normalized().mult(7);
+            ball_vel = ball_vel.normalized().mult(6);
             paused = false;
         }
         if (!paused) {

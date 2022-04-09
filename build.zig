@@ -11,21 +11,35 @@ pub fn build(b: *std.build.Builder) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    const exe = b.addExecutable("zig-pong", "src/main.zig");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
-    exe.linkLibC();
-    exe.linkSystemLibrary("sdl2");
-    exe.install();
+    const game_exe = b.addExecutable("zig-pong", "src/GameMain.zig");
+    game_exe.setTarget(target);
+    game_exe.setBuildMode(mode);
+    game_exe.linkLibC();
+    game_exe.linkSystemLibrary("sdl2");
+    game_exe.install();
 
-    const run_cmd = exe.run();
-    run_cmd.step.dependOn(b.getInstallStep());
+    const run_game_cmd = game_exe.run();
+    run_game_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
-        run_cmd.addArgs(args);
+        run_game_cmd.addArgs(args);
     }
 
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
+    const server_exe = b.addExecutable("zig-pong-server", "src/ServerMain.zig");
+    server_exe.setTarget(target);
+    server_exe.setBuildMode(mode);
+    server_exe.install();
+
+    const run_server_cmd = server_exe.run();
+    run_server_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_server_cmd.addArgs(args);
+    }
+
+    const run_game_step = b.step("run", "Run the game");
+    run_game_step.dependOn(&run_game_cmd.step);
+
+    const run_server_step = b.step("run-server", "Run the server");
+    run_server_step.dependOn(&run_server_cmd.step);
 
     const test_step = b.step("test", "Run unit tests");
 
