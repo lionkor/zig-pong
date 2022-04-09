@@ -152,6 +152,7 @@ pub fn main() anyerror!void {
                 paused = true;
                 ball.x = SDLContext.WIDTH / 2 - @divTrunc(ball.w, 2);
                 ball.y = SDLContext.HEIGHT / 2 - @divTrunc(ball.h, 2);
+                try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
             }
             if (ball.y + ball.h >= SDLContext.HEIGHT) {
                 // bounce
@@ -165,6 +166,7 @@ pub fn main() anyerror!void {
                 paused = true;
                 ball.x = SDLContext.WIDTH / 2 - @divTrunc(ball.w, 2);
                 ball.y = SDLContext.HEIGHT / 2 - @divTrunc(ball.h, 2);
+                try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
             }
             if (ball.y < 0) {
                 // bounce
@@ -192,7 +194,6 @@ pub fn main() anyerror!void {
                 ball_vel = ball_vel.normalized().mult(6);
                 paused = false;
                 try net.writePacket(Packet.make(.BallVel, ball_vel));
-                try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
             }
             if (!paused) {
                 ball.x = @floatToInt(i32, @intToFloat(f32, ball.x) + ball_vel.x);
