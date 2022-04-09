@@ -11,7 +11,7 @@ const Pos = struct {
 
 var other_last_pos: i32 = 0;
 var ball_pos: Pos = .{ .x = 0, .y = 0 };
-var remote_ball_vel: Vec2 = .{};
+var remote_ball_vel: Vec2 = .{ .x = 0, .y = 0 };
 
 fn readThreadMain(net: *NetClient) !void {
     while (true) {
