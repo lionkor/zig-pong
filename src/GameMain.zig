@@ -10,7 +10,7 @@ const Pos = struct {
 };
 
 var other_last_pos: i32 = 0;
-var ball_pos: Pos = .{ .x = 0, .y = 0 };
+var ball_pos: Pos = .{ .x = -1, .y = -1 };
 var remote_ball_vel: Vec2 = .{ .x = 0, .y = 0 };
 
 fn readThreadMain(net: *NetClient) !void {
@@ -194,10 +194,13 @@ pub fn main() anyerror!void {
                 ball_vel = ball_vel.normalized().mult(6);
                 paused = false;
                 try net.writePacket(Packet.make(.BallVel, ball_vel));
+                try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
             }
             if (!paused) {
                 ball.x = @floatToInt(i32, @intToFloat(f32, ball.x) + ball_vel.x);
                 ball.y = @floatToInt(i32, @intToFloat(f32, ball.y) + ball_vel.y);
+            } else {
+                try net.writePacket(Packet.make(.BallVel, .{ .x = 0, .y = 0 }));
             }
             if (std.time.milliTimestamp() - last_ball_update > 15) {
                 last_ball_update = std.time.milliTimestamp();
@@ -206,6 +209,10 @@ pub fn main() anyerror!void {
         } else {
             ball.x = @floatToInt(i32, @intToFloat(f32, ball.x) + remote_ball_vel.x);
             ball.y = @floatToInt(i32, @intToFloat(f32, ball.y) + remote_ball_vel.y);
+            if (ball_pos.x != -1 and ball_pos.y != -1) {
+                ball.x = ball_pos.x;
+                ball.y = ball_pos.y;
+            }
         }
         context.drawRect(&player1);
         context.drawRect(&player2);
