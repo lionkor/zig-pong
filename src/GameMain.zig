@@ -11,6 +11,7 @@ const Pos = struct {
 
 var other_last_pos: i32 = 0;
 var ball_pos: Pos = .{ .x = 0, .y = 0 };
+var ball_vel: Vec2 = .{};
 
 fn readThreadMain(net: *NetClient) !void {
     while (true) {
@@ -19,6 +20,8 @@ fn readThreadMain(net: *NetClient) !void {
             other_last_pos = other_packet.get(i32);
         } else if (other_packet.is(.BallPos)) {
             ball_pos = other_packet.get(Pos);
+        } else if (other_packet.is(.BallVel)) {
+            ball_vel = other_packet.get(Vec2);
         }
     }
 }
@@ -127,6 +130,8 @@ pub fn main() anyerror!void {
 
     var thread = try std.Thread.spawn(.{}, readThreadMain, .{&net});
 
+    var last_ball_update = std.time.milliTimestamp();
+
     while (context.is_open) {
         context.processEvents();
         context.renderClear();
@@ -153,6 +158,7 @@ pub fn main() anyerror!void {
             if (ball.y + ball.h >= SDLContext.HEIGHT) {
                 // bounce
                 ball_vel = ball_vel.reflected(Vec2{ .x = 0, .y = -1 });
+                try net.writePacket(Packet.make(.BallVel, ball_vel));
             }
             if (ball.x < 0) {
                 // player1 loses
@@ -165,6 +171,7 @@ pub fn main() anyerror!void {
             if (ball.y < 0) {
                 // bounce
                 ball_vel = ball_vel.reflected(Vec2{ .x = 0, .y = 1 });
+                try net.writePacket(Packet.make(.BallVel, ball_vel));
             }
             // pedal collision
             // player 1
@@ -172,27 +179,37 @@ pub fn main() anyerror!void {
                 if (ball_vel.x < 0) {
                     ball_vel = ball_vel.reflected(Vec2{ .x = 1, .y = 0 });
                 }
+                try net.writePacket(Packet.make(.BallVel, ball_vel));
             }
             // player 2
             if (ball.collidesWith(&player2)) {
                 if (ball_vel.x > 0) {
                     ball_vel = ball_vel.reflected(Vec2{ .x = -1, .y = 0 });
                 }
+                try net.writePacket(Packet.make(.BallVel, ball_vel));
             }
             if (paused and context.is_space_pressed) {
                 ball_vel.x = rand.float(f32) - 0.5;
                 ball_vel.y = (rand.float(f32) - 0.5) * 0.3;
                 ball_vel = ball_vel.normalized().mult(6);
                 paused = false;
+                try net.writePacket(Packet.make(.BallVel, ball_vel));
             }
             if (!paused) {
                 ball.x = @floatToInt(i32, @intToFloat(f32, ball.x) + ball_vel.x);
                 ball.y = @floatToInt(i32, @intToFloat(f32, ball.y) + ball_vel.y);
             }
-            try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
+            if (std.time.milliTimestamp() - last_ball_update > 15) {
+                last_ball_update = std.time.milliTimestamp();
+                try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
+            }
         } else {
-            ball.x = ball_pos.x;
-            ball.y = ball_pos.y;
+            if (std.math.absInt(ball.x - ball_pos.x) > 1) {
+                ball.x = ball_pos.x;
+            }
+            if (std.math.absInt(ball.y - ball_pos.y) > 1) {
+                ball.y = ball_pos.y;
+            }
         }
         context.drawRect(&player1);
         context.drawRect(&player2);
