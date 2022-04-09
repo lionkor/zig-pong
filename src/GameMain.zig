@@ -130,8 +130,6 @@ pub fn main() anyerror!void {
 
     var thread = try std.Thread.spawn(.{}, readThreadMain, .{&net});
 
-    var last_ball_update = std.time.milliTimestamp();
-
     while (context.is_open) {
         context.processEvents();
         context.renderClear();
@@ -201,10 +199,6 @@ pub fn main() anyerror!void {
                 ball.y = @floatToInt(i32, @intToFloat(f32, ball.y) + ball_vel.y);
             } else {
                 try net.writePacket(Packet.make(.BallVel, .{ .x = 0, .y = 0 }));
-            }
-            if (std.time.milliTimestamp() - last_ball_update > 100) {
-                last_ball_update = std.time.milliTimestamp();
-                try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
             }
         } else {
             ball.x = @floatToInt(i32, @intToFloat(f32, ball.x) + remote_ball_vel.x);
