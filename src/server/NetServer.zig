@@ -61,7 +61,7 @@ pub fn deinit(self: *NetServer) void {
 }
 
 pub fn start(self: *NetServer, port: u16) !void {
-    var addr = std.net.Address.initIp4([4]u8{ 127, 0, 0, 1 }, port);
+    var addr = std.net.Address.initIp4([4]u8{ 0, 0, 0, 0 }, port);
     try self.server.listen(addr);
 }
 
