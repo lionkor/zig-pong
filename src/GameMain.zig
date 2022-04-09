@@ -21,7 +21,7 @@ fn readThreadMain(net: *NetClient) !void {
         } else if (other_packet.is(.BallPos)) {
             ball_pos = other_packet.get(Pos);
         } else if (other_packet.is(.BallVel)) {
-            ball_vel = other_packet.get(Vec2);
+            remote_ball_vel = other_packet.get(Vec2);
         }
     }
 }
