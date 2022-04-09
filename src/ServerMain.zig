@@ -1,25 +1,32 @@
 const std = @import("std");
-const Server = @import("server/Server.zig");
+const NetServer = @import("server/NetServer.zig");
 const Packet = @import("Packet.zig");
 
-fn clientHandshake(client: *Server.Client, is_first: bool) !void {
+fn clientHandshake(client: *NetServer.Client, is_first: bool) !void {
     if (is_first) {
-        try client.writePacket(Packet.make(.Side, [1:0]u8{'L'}));
+        try client.writePacket(Packet.make(.Side, [1]u8{'L'}));
     } else {
-        try client.writePacket(Packet.make(.Side, [1:0]u8{'R'}));
+        try client.writePacket(Packet.make(.Side, [1]u8{'R'}));
     }
 }
 
 const ClientThreadContext = struct {
-    client: *Server.Client,
-    otherClient: *Server.Client,
+    client: *NetServer.Client,
+    otherClient: *NetServer.Client,
 };
 
-fn clientThread(client: *Server.Client, otherClient: *Server.Client) !void {
+fn clientSendThread(client: *NetServer.Client) !void {
+    while (true) {
+        if (client.getNextSendPacket()) |packet| {
+            try client.writePacket(packet);
+        }
+    }
+}
+
+fn clientReceiveThread(client: *NetServer.Client, otherClient: *NetServer.Client) !void {
     while (true) {
         var packet: Packet = try client.readPacket();
-        std.log.debug("got packet: {}", .{packet});
-        otherClient.pushSendPacket(packet);
+        try otherClient.pushSendPacket(packet);
     }
 }
 
@@ -36,7 +43,7 @@ pub fn main() anyerror!void {
     }
     var port = try std.fmt.parseUnsigned(u16, args[1], 10);
 
-    var server = Server.init();
+    var server = NetServer.init();
     defer server.deinit();
     try server.start(port);
 
@@ -54,8 +61,12 @@ pub fn main() anyerror!void {
 
     std.log.info("client 2 connected: {}", .{client2.conn.address});
 
-    var client1_thread = try std.Thread.spawn(.{}, clientThread, .{ &client1, &client2 });
-    var client2_thread = try std.Thread.spawn(.{}, clientThread, .{ &client2, &client1 });
-    client1_thread.join();
-    client2_thread.join();
+    var client1_recv_thread = try std.Thread.spawn(.{}, clientReceiveThread, .{ &client1, &client2 });
+    var client1_send_thread = try std.Thread.spawn(.{}, clientSendThread, .{&client1});
+    var client2_recv_thread = try std.Thread.spawn(.{}, clientReceiveThread, .{ &client2, &client1 });
+    var client2_send_thread = try std.Thread.spawn(.{}, clientSendThread, .{&client2});
+    client1_recv_thread.join();
+    client1_send_thread.join();
+    client2_recv_thread.join();
+    client2_send_thread.join();
 }

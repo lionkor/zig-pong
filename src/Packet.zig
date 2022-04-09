@@ -26,7 +26,7 @@ pub fn make(packet_type: Type, data: anytype) Packet {
 }
 
 pub fn get(self: *Packet, comptime T: type) T {
-    return std.mem.bytesToValue(T, self.buf[@sizeOf(Type)..]);
+    return std.mem.bytesToValue(T, self.buf[@sizeOf(Type) .. @sizeOf(Type) + @sizeOf(T)]);
 }
 
 pub fn is(self: *Packet, packet_type: Type) bool {
