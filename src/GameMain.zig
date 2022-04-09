@@ -212,6 +212,8 @@ pub fn main() anyerror!void {
             if (ball_pos.x != -1 and ball_pos.y != -1) {
                 ball.x = ball_pos.x;
                 ball.y = ball_pos.y;
+                ball_pos.x = -1;
+                ball_pos.y = -1;
             }
         }
         context.drawRect(&player1);
