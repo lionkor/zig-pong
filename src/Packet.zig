@@ -1,7 +1,7 @@
 const std = @import("std");
 const Packet = @This();
 
-buf: [32]u8 = undefined,
+buf: [16]u8 = undefined,
 
 pub const Type = enum(u16) {
     Side = 1,
