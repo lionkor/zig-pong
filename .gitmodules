@@ -1,0 +1,3 @@
+[submodule "src/network/zig-network"]
+	path = src/network/zig-network
+	url = https://github.com/MasterQ32/zig-network

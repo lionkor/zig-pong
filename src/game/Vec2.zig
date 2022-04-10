@@ -1,8 +1,8 @@
 const std = @import("std");
 const Vec2 = @This();
 
-x: f32,
-y: f32,
+x: f32 = 0.0,
+y: f32 = 0.0,
 
 inline fn approxEq(comptime T: type, a: T, b: T) bool {
     return std.math.approxEqRel(f32, a, b, std.math.sqrt(std.math.epsilon(T)));

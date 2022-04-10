@@ -1,30 +1,13 @@
 const std = @import("std");
 const Vec2 = @import("game/Vec2.zig");
 const SDLContext = @import("game/SDLContext.zig");
-const NetClient = @import("game/NetClient.zig");
-const Packet = @import("Packet.zig");
+const NetClient = @import("network/NetClient.zig");
+const Packet = @import("network/Packet.zig");
 
 const Pos = struct {
-    x: i32,
-    y: i32,
+    x: i32 = 0,
+    y: i32 = 0,
 };
-
-var other_last_pos: i32 = 0;
-var ball_pos: Pos = .{ .x = -1, .y = -1 };
-var remote_ball_vel: Vec2 = .{ .x = 0, .y = 0 };
-
-fn readThreadMain(net: *NetClient) !void {
-    while (true) {
-        var other_packet = try net.readPacket();
-        if (other_packet.is(.PlayerPos)) {
-            other_last_pos = other_packet.get(i32);
-        } else if (other_packet.is(.BallPos)) {
-            ball_pos = other_packet.get(Pos);
-        } else if (other_packet.is(.BallVel)) {
-            remote_ball_vel = other_packet.get(Vec2);
-        }
-    }
-}
 
 pub fn main() anyerror!void {
     var alloc = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
@@ -39,13 +22,17 @@ pub fn main() anyerror!void {
     }
     var port = try std.fmt.parseUnsigned(u16, args[2], 10);
 
-    var net = NetClient{ .conn = try std.net.tcpConnectToHost(allocator, args[1], port) };
-    var side_packet = try net.readPacket();
-    if (!side_packet.is(.Side)) {
+    var net = try NetClient.init(allocator, args[1], port);
+    try net.startThreads();
+    var side_packet: ?Packet = null;
+    while (side_packet == null) {
+        side_packet = net.getReadPacket();
+    }
+    if (!side_packet.?.is(.Side)) {
         std.log.err("invalid packet, expected side packet!", .{});
         std.process.exit(1);
     }
-    const side = side_packet.get([1]u8)[0];
+    const side = side_packet.?.get([1]u8)[0];
     const host = side == 'L'; // left player is physics host
     std.log.info("server told us that we're side '{c}'", .{side});
 
@@ -91,8 +78,6 @@ pub fn main() anyerror!void {
         this_player = &player2;
     }
 
-    other_last_pos = other_player.y;
-
     this_player.color = .{
         .r = 0x00,
         .g = 0x00,
@@ -128,21 +113,32 @@ pub fn main() anyerror!void {
 
     var rand = std.rand.DefaultPrng.init(@bitCast(u64, std.time.milliTimestamp())).random();
 
-    var thread = try std.Thread.spawn(.{}, readThreadMain, .{&net});
+    var last_ball_pos: Pos = .{};
+
+    var time = std.time.milliTimestamp();
 
     while (context.is_open) {
+        var now = std.time.milliTimestamp();
+        if (now - time > 1000) {
+            // send side packet back via udp, which starts up udp if it hasn't yet
+            // TODO: this cannot(!) get lost, or UDP will be dead
+            if (host) {
+                try net.writePacket(Packet.makeUnreliableWithPriority(.Side, [1]u8{'L'}, 10));
+            } else {
+                try net.writePacket(Packet.makeUnreliableWithPriority(.Side, [1]u8{'R'}, 10));
+            }
+            time = now;
+        }
         context.processEvents();
         context.renderClear();
         if (context.is_down_pressed) {
             this_player.y = std.math.min(this_player.y + player_vel, SDLContext.HEIGHT - this_player.h);
-            try net.writePacket(Packet.make(.PlayerPos, this_player.y));
+            try net.writePacket(Packet.makeUnreliableWithPriority(.PlayerPos, this_player.y, 1));
         }
         if (context.is_up_pressed) {
             this_player.y = std.math.max(this_player.y - player_vel, 0);
-            try net.writePacket(Packet.make(.PlayerPos, this_player.y));
+            try net.writePacket(Packet.makeUnreliableWithPriority(.PlayerPos, this_player.y, 1));
         }
-
-        other_player.y = other_last_pos;
 
         if (host) {
             if (ball.x + ball.w >= SDLContext.WIDTH) {
@@ -154,12 +150,11 @@ pub fn main() anyerror!void {
                 ball.y = SDLContext.HEIGHT / 2 - @divTrunc(ball.h, 2);
                 ball_vel.x = 0;
                 ball_vel.y = 0;
-                try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
+                try net.writePacket(Packet.makeUnreliableWithPriority(.BallPos, Pos{ .x = ball.x, .y = ball.y }, 1));
             }
             if (ball.y + ball.h >= SDLContext.HEIGHT) {
                 // bounce
                 ball_vel = ball_vel.reflected(Vec2{ .x = 0, .y = -1 });
-                try net.writePacket(Packet.make(.BallVel, ball_vel));
             }
             if (ball.x < 0) {
                 // player1 loses
@@ -170,12 +165,11 @@ pub fn main() anyerror!void {
                 ball.y = SDLContext.HEIGHT / 2 - @divTrunc(ball.h, 2);
                 ball_vel.x = 0;
                 ball_vel.y = 0;
-                try net.writePacket(Packet.make(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
+                try net.writePacket(Packet.makeUnreliableWithPriority(.BallPos, Pos{ .x = ball.x, .y = ball.y }, 1));
             }
             if (ball.y < 0) {
                 // bounce
                 ball_vel = ball_vel.reflected(Vec2{ .x = 0, .y = 1 });
-                try net.writePacket(Packet.make(.BallVel, ball_vel));
             }
             // pedal collision
             // player 1
@@ -183,36 +177,53 @@ pub fn main() anyerror!void {
                 if (ball_vel.x < 0) {
                     ball_vel = ball_vel.reflected(Vec2{ .x = 1, .y = 0 });
                 }
-                try net.writePacket(Packet.make(.BallVel, ball_vel));
             }
             // player 2
             if (ball.collidesWith(&player2)) {
                 if (ball_vel.x > 0) {
                     ball_vel = ball_vel.reflected(Vec2{ .x = -1, .y = 0 });
                 }
-                try net.writePacket(Packet.make(.BallVel, ball_vel));
             }
             if (paused and context.is_space_pressed) {
                 ball_vel.x = rand.float(f32) - 0.5;
                 ball_vel.y = (rand.float(f32) - 0.5) * 0.3;
                 ball_vel = ball_vel.normalized().mult(6);
                 paused = false;
-                try net.writePacket(Packet.make(.BallVel, ball_vel));
             }
             if (!paused) {
                 ball.x = @floatToInt(i32, @intToFloat(f32, ball.x) + ball_vel.x);
                 ball.y = @floatToInt(i32, @intToFloat(f32, ball.y) + ball_vel.y);
-            } else {
-                try net.writePacket(Packet.make(.BallVel, .{ .x = 0, .y = 0 }));
             }
-        } else {
-            ball.x = @floatToInt(i32, @intToFloat(f32, ball.x) + remote_ball_vel.x);
-            ball.y = @floatToInt(i32, @intToFloat(f32, ball.y) + remote_ball_vel.y);
-            if (ball_pos.x != -1 and ball_pos.y != -1) {
-                ball.x = ball_pos.x;
-                ball.y = ball_pos.y;
-                ball_pos.x = -1;
-                ball_pos.y = -1;
+            const diff = 5;
+            if ((try std.math.absInt(last_ball_pos.x - ball.x)) +
+                (try std.math.absInt(last_ball_pos.y - ball.y)) > diff)
+            {
+                last_ball_pos.x = ball.x;
+                last_ball_pos.y = ball.y;
+                try net.writePacket(Packet.makeUnreliable(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
+            }
+        }
+        while (true) {
+            var maybe_packet = net.getReadPacket();
+            if (maybe_packet != null) {
+                var packet = maybe_packet.?;
+                std.log.debug("got packet: {}", .{packet});
+                switch (packet.getType()) {
+                    Packet.Type.BallPos => {
+                        if (!host) {
+                            var pos: Pos = packet.get(Pos);
+                            ball.x = pos.x;
+                            ball.y = pos.y;
+                        }
+                    },
+                    Packet.Type.PlayerPos => {
+                        var pos: i32 = packet.get(i32);
+                        other_player.y = pos;
+                    },
+                    else => std.log.err("unexpected packet type: {}", .{packet}),
+                }
+            } else {
+                break;
             }
         }
         context.drawRect(&player1);
@@ -220,6 +231,4 @@ pub fn main() anyerror!void {
         context.drawRect(&ball);
         context.renderPresent();
     }
-
-    thread.join();
 }
