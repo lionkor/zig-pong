@@ -117,6 +117,8 @@ pub fn main() anyerror!void {
 
     var time = std.time.milliTimestamp();
 
+    const ball_speed = 6;
+
     while (context.is_open) {
         var now = std.time.milliTimestamp();
         if (now - time > 1000) {
@@ -187,7 +189,7 @@ pub fn main() anyerror!void {
             if (paused and context.is_space_pressed) {
                 ball_vel.x = rand.float(f32) - 0.5;
                 ball_vel.y = (rand.float(f32) - 0.5) * 0.3;
-                ball_vel = ball_vel.normalized().mult(6);
+                ball_vel = ball_vel.normalized().mult(ball_speed);
                 paused = false;
             }
             if (!paused) {
@@ -207,7 +209,6 @@ pub fn main() anyerror!void {
             var maybe_packet = net.getReadPacket();
             if (maybe_packet != null) {
                 var packet = maybe_packet.?;
-                std.log.debug("got packet: {}", .{packet});
                 switch (packet.getType()) {
                     Packet.Type.BallPos => {
                         if (!host) {

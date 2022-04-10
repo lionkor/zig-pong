@@ -62,7 +62,6 @@ const InternalQueues = struct {
         self.read_queue_mtx.lock();
         defer self.read_queue_mtx.unlock();
         var node = self.read_queue.popFirst();
-        std.log.info("node: {}", .{node});
         if (node == null) {
             return null;
         } else {
@@ -144,13 +143,11 @@ fn writeThreadMain(client: *NetClient) !void {
             if (n != packet.buf.len) {
                 std.log.err("failed to send expected number of bytes via tcp", .{});
             }
-            std.log.debug("sent tcp: {}", .{packet});
         } else {
             const n = try client.udp.writer().write(&packet.buf);
             if (n != packet.buf.len) {
                 std.log.err("failed to send expected number of bytes via udp", .{});
             }
-            std.log.debug("sent udp: {}", .{packet});
         }
     }
 }
