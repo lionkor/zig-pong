@@ -12,6 +12,7 @@ pub const Client = struct {
     tcp: std.net.StreamServer.Connection,
     send_queue: std.PriorityQueue(Packet, void, packetPrioCompare),
     send_queue_mtx: std.Thread.Mutex,
+    send_queue_cnd: std.Thread.Condition,
 
     end_point: ?network.EndPoint = null,
 
@@ -36,7 +37,20 @@ pub const Client = struct {
     pub fn pushSendPacket(self: *Client, packet: Packet) !void {
         self.send_queue_mtx.lock();
         defer self.send_queue_mtx.unlock();
+        defer self.send_queue_cnd.signal();
         try self.send_queue.add(packet);
+    }
+
+    pub fn waitAndGetNextSendPacket(self: *Client) ?Packet {
+        self.send_queue_mtx.lock();
+        defer self.send_queue_mtx.unlock();
+        self.send_queue_cnd.wait(&self.send_queue_mtx);
+        var node = self.send_queue.removeOrNull();
+        if (node == null) {
+            return null;
+        } else {
+            return node.?;
+        }
     }
 
     pub fn getNextSendPacket(self: *Client) ?Packet {
@@ -81,5 +95,6 @@ pub fn accept(self: *NetServer, allocator: std.mem.Allocator) !Client {
         .tcp = try self.tcp_server.accept(),
         .send_queue = std.PriorityQueue(Packet, void, packetPrioCompare).init(allocator, void{}),
         .send_queue_mtx = .{},
+        .send_queue_cnd = .{},
     };
 }

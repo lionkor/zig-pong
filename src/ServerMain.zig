@@ -13,8 +13,14 @@ fn clientHandshake(client: *NetServer.Client, is_first: bool) !void {
 
 fn clientSendThread(client: *NetServer.Client) !void {
     while (true) {
-        if (client.getNextSendPacket()) |packet| {
+        if (client.waitAndGetNextSendPacket()) |packet| {
             try client.writePacket(packet);
+            // mass-send the rest without waiting, if there are any
+            var maybe_packet = client.getNextSendPacket();
+            while (maybe_packet != null) {
+                try client.writePacket(maybe_packet.?);
+                maybe_packet = client.getNextSendPacket();
+            }
         }
     }
 }
