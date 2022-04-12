@@ -1,12 +1,12 @@
 const std = @import("std");
 const PacketType = @import("PacketType.zig").PacketType;
-const Packet = @import("network/Packet.zig").Packet(PacketType);
+const Packet = @import("network/Packet.zig").Packet(PacketType, 16);
 const NetServer = @import("network/NetServer.zig").NetServer(Packet);
 const network = @import("network/zig-network/network.zig");
 
 var is_first = true;
 fn clientHandshake(client: *NetServer.Client) void {
-    std.log.debug("handshaking {}", .{client.tcp.getLocalEndPoint()});
+    std.log.debug("handshaking {}", .{client.tcp.getRemoteEndPoint()});
     if (is_first) {
         client.pushSendPacket(Packet.makeReliable(.Side, [1]u8{'L'})) catch unreachable;
     } else {

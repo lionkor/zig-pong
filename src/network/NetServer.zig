@@ -114,7 +114,7 @@ pub fn NetServer(comptime PacketT: type) type {
             self.clients_mtx.lock();
             defer self.clients_mtx.unlock();
             self.clients.prepend(node);
-            std.log.debug("adding new client {}", .{client.tcp.getLocalEndPoint()});
+            std.log.debug("adding new client {}", .{client.tcp.getRemoteEndPoint()});
             return &node.data;
         }
 
@@ -192,7 +192,7 @@ pub fn NetServer(comptime PacketT: type) type {
             while (!server.shutdown) {
                 while (client.getNextSendPacket()) |packet_to_send| {
                     client.writePacket(packet_to_send) catch {
-                        std.log.err("failed to send {} to {}", .{ packet_to_send, client.tcp.getLocalEndPoint() });
+                        std.log.err("failed to send {} to {}", .{ packet_to_send, client.tcp.getRemoteEndPoint() });
                     };
                 }
             }
@@ -201,7 +201,7 @@ pub fn NetServer(comptime PacketT: type) type {
         fn tcpReadThread(server: *Self, client: *Client) void {
             while (!server.shutdown) {
                 var packet: PacketT = client.readPacketTcp() catch {
-                    std.log.err("failed to recv from {}", .{client.tcp.getLocalEndPoint()});
+                    std.log.err("failed to recv from {}", .{client.tcp.getRemoteEndPoint()});
                     break;
                 };
                 server.clients_mtx.lock();

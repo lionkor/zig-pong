@@ -10,7 +10,7 @@ const Pos = struct {
     y: i32 = 0,
 };
 
-const GamePacket = Packet(PacketType);
+const GamePacket = Packet(PacketType, 16);
 const GameNetClient = NetClient(GamePacket);
 
 pub fn main() anyerror!void {
