@@ -1,13 +1,17 @@
 const std = @import("std");
 const Vec2 = @import("game/Vec2.zig");
 const SDLContext = @import("game/SDLContext.zig");
-const NetClient = @import("network/NetClient.zig");
-const Packet = @import("network/Packet.zig");
+const NetClient = @import("network/NetClient.zig").NetClient;
+const Packet = @import("network/Packet.zig").Packet;
+const PacketType = @import("PacketType.zig").PacketType;
 
 const Pos = struct {
     x: i32 = 0,
     y: i32 = 0,
 };
+
+const GamePacket = Packet(PacketType);
+const GameNetClient = NetClient(GamePacket);
 
 pub fn main() anyerror!void {
     var alloc = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
@@ -22,9 +26,9 @@ pub fn main() anyerror!void {
     }
     var port = try std.fmt.parseUnsigned(u16, args[2], 10);
 
-    var net = try NetClient.init(allocator, args[1], port);
+    var net = try GameNetClient.init(allocator, args[1], port);
     try net.startThreads();
-    var side_packet: ?Packet = null;
+    var side_packet: ?GamePacket = null;
     while (side_packet == null) {
         side_packet = net.getReadPacket();
     }
@@ -117,16 +121,18 @@ pub fn main() anyerror!void {
 
     const ball_speed = 6;
 
+    try net.writePacket(GamePacket.makeUnreliable(.Ping, @as(u32, 0)));
+
     while (context.is_open) {
         context.processEvents();
         context.renderClear();
         if (context.is_down_pressed) {
             this_player.y = std.math.min(this_player.y + player_vel, SDLContext.HEIGHT - this_player.h);
-            try net.writePacket(Packet.makeUnreliableWithPriority(.PlayerPos, this_player.y, 1));
+            try net.writePacket(GamePacket.makeUnreliableWithPriority(.PlayerPos, this_player.y, 1));
         }
         if (context.is_up_pressed) {
             this_player.y = std.math.max(this_player.y - player_vel, 0);
-            try net.writePacket(Packet.makeUnreliableWithPriority(.PlayerPos, this_player.y, 1));
+            try net.writePacket(GamePacket.makeUnreliableWithPriority(.PlayerPos, this_player.y, 1));
         }
 
         if (host) {
@@ -139,7 +145,7 @@ pub fn main() anyerror!void {
                 ball.y = SDLContext.HEIGHT / 2 - @divTrunc(ball.h, 2);
                 ball_vel.x = 0;
                 ball_vel.y = 0;
-                try net.writePacket(Packet.makeUnreliableWithPriority(.BallPos, Pos{ .x = ball.x, .y = ball.y }, 1));
+                try net.writePacket(GamePacket.makeUnreliableWithPriority(.BallPos, Pos{ .x = ball.x, .y = ball.y }, 1));
             }
             if (ball.y + ball.h >= SDLContext.HEIGHT) {
                 // bounce
@@ -154,7 +160,7 @@ pub fn main() anyerror!void {
                 ball.y = SDLContext.HEIGHT / 2 - @divTrunc(ball.h, 2);
                 ball_vel.x = 0;
                 ball_vel.y = 0;
-                try net.writePacket(Packet.makeUnreliableWithPriority(.BallPos, Pos{ .x = ball.x, .y = ball.y }, 1));
+                try net.writePacket(GamePacket.makeUnreliableWithPriority(.BallPos, Pos{ .x = ball.x, .y = ball.y }, 1));
             }
             if (ball.y < 0) {
                 // bounce
@@ -189,7 +195,7 @@ pub fn main() anyerror!void {
             {
                 last_ball_pos.x = ball.x;
                 last_ball_pos.y = ball.y;
-                try net.writePacket(Packet.makeUnreliable(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
+                try net.writePacket(GamePacket.makeUnreliable(.BallPos, Pos{ .x = ball.x, .y = ball.y }));
             }
         }
         while (true) {
@@ -197,14 +203,15 @@ pub fn main() anyerror!void {
             if (maybe_packet != null) {
                 var packet = maybe_packet.?;
                 switch (packet.getType()) {
-                    Packet.Type.BallPos => {
+                    .Ping => {},
+                    .BallPos => {
                         if (!host) {
                             var pos: Pos = packet.get(Pos);
                             ball.x = pos.x;
                             ball.y = pos.y;
                         }
                     },
-                    Packet.Type.PlayerPos => {
+                    .PlayerPos => {
                         var pos: i32 = packet.get(i32);
                         other_player.y = pos;
                     },

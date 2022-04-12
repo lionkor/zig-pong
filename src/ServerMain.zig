@@ -1,6 +1,7 @@
 const std = @import("std");
-const NetServer = @import("network/NetServer.zig");
-const Packet = @import("network/Packet.zig");
+const PacketType = @import("PacketType.zig").PacketType;
+const Packet = @import("network/Packet.zig").Packet(PacketType);
+const NetServer = @import("network/NetServer.zig").NetServer(Packet);
 const network = @import("network/zig-network/network.zig");
 
 var is_first = true;
