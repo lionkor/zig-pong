@@ -8,7 +8,7 @@ fn packetPrioCompare(context: void, a: Packet, b: Packet) std.math.Order {
     return std.math.order(a.prio, b.prio);
 }
 
-pub const Client = struct {
+const Client = struct {
     tcp: std.net.StreamServer.Connection,
     send_queue: std.PriorityQueue(Packet, void, packetPrioCompare),
     send_queue_mtx: std.Thread.Mutex,
@@ -65,36 +65,74 @@ pub const Client = struct {
     }
 };
 
-tcp_server: std.net.StreamServer,
+tcp_server: network.Socket,
+udp_server: network.Socket,
+clients: std.ArrayList(Client),
+clients_mtx: std.Thread.Mutex,
+endpoints: std.ArrayList(Client),
+endpoints_mtx: std.Thread.Mutex,
+allocator: std.mem.Allocator,
 
-pub fn init() NetServer {
+fn addClient(self: *NetServer, client: Client) !void {
+    self.clients_mtx.lock();
+    defer self.clients_mtx.unlock();
+    try self.clients.append(client);
+}
+
+pub fn init(allocator: std.mem.Allocator, tcp_port: u16, udp_port: u16) NetServer {
     network.init() catch {
         std.log.err("failed to init network, may not function properly", .{});
     };
-    return NetServer{
-        .tcp_server = std.net.StreamServer.init(std.net.StreamServer.Options{
-            .kernel_backlog = 2,
-            .reuse_address = true,
-        }),
+    var server = NetServer{
+        .tcp_server = network.Socket.create(.ipv6, .tcp),
+        .udp_server = network.Socket.create(.ipv6, .udp),
+        .clients = std.ArrayList(Client).init(allocator),
     };
+    // TCP init: bind(), listen()
+    try server.tcp_server.bindToPort(tcp_port);
+    try server.tcp_server.listen();
+    // UDP init: bind()
+    try server.udp_server.bindToPort(udp_port);
+    return server;
 }
 
 pub fn deinit(self: *NetServer) void {
+    self.clients.deinit();
     network.deinit();
     self.tcp_server.deinit();
     self.* = undefined;
 }
 
-pub fn start(self: *NetServer, port: u16) !void {
-    var addr = std.net.Address.initIp4([4]u8{ 0, 0, 0, 0 }, port);
-    try self.tcp_server.listen(addr);
+// blocking
+pub fn start(self: *NetServer) void {
+    while (true) {
+        var client = self.accept();
+        self.clients_mtx.lock();
+        defer self.clients_mtx.unlock();
+        self.clients.append(client);
+    }
 }
 
-pub fn accept(self: *NetServer, allocator: std.mem.Allocator) !Client {
+fn accept(
+    self: *NetServer,
+) !Client {
     return Client{
         .tcp = try self.tcp_server.accept(),
         .send_queue = std.PriorityQueue(Packet, void, packetPrioCompare).init(allocator, void{}),
         .send_queue_mtx = .{},
         .send_queue_cnd = .{},
     };
+}
+
+fn isEndpointKnown(self:*NetServer) void{
+    return self.endpoints
+}
+
+fn udpSendThread(server: *NetServer) void {}
+
+fn udpRecvThread(server: *NetServer) void {
+    while (true) {
+        var packet: Packet = .{};
+        var recv = udp.receiveFrom(&packet.buf) catch unreachable;
+    }
 }

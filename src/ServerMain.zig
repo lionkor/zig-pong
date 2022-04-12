@@ -48,9 +48,8 @@ pub fn main() anyerror!void {
     var udp: network.Socket = try network.Socket.create(.ipv6, .udp);
     try udp.bindToPort(port);
 
-    var server = NetServer.init();
+    var server = try NetServer.init(port);
     defer server.deinit();
-    try server.start(port);
 
     std.log.info("starting zig-pong server on port {}", .{port});
 
@@ -71,29 +70,6 @@ pub fn main() anyerror!void {
     var client2_recv_thread = try std.Thread.spawn(.{}, clientTcpReceiveThread, .{ &client2, &client1 });
     var client2_send_thread = try std.Thread.spawn(.{}, clientSendThread, .{&client2});
 
-    while (true) {
-        var packet: Packet = .{};
-        var recv = try udp.receiveFrom(&packet.buf);
-        if (packet.is(.Side)) {
-            if (packet.get([1]u8)[0] == 'L' and client1.end_point == null) {
-                client1.end_point = recv.sender;
-            } else if (packet.get([1]u8)[0] == 'R' and client2.end_point == null) {
-                client2.end_point = recv.sender;
-            }
-        } else if (client1.end_point != null and client2.end_point != null) {
-            if (client1.end_point.?.address.eql(recv.sender.address) and client1.end_point.?.port == recv.sender.port) {
-                const n = try udp.sendTo(client2.end_point.?, &packet.buf);
-                if (n != packet.buf.len) {
-                    std.log.err("expected {} bytes to be sent, instead only sent {}", .{ packet.buf.len, n });
-                }
-            } else if (client2.end_point.?.address.eql(recv.sender.address) and client2.end_point.?.port == recv.sender.port) {
-                const n = try udp.sendTo(client1.end_point.?, &packet.buf);
-                if (n != packet.buf.len) {
-                    std.log.err("expected {} bytes to be sent, instead only sent {}", .{ packet.buf.len, n });
-                }
-            }
-        }
-    }
     client1_recv_thread.join();
     client1_send_thread.join();
     client2_recv_thread.join();
