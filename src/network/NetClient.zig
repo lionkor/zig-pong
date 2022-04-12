@@ -56,6 +56,7 @@ const InternalQueues = struct {
         var node = try self.allocator.create(std.TailQueue(Packet).Node);
         node.data = packet;
         self.read_queue.append(node);
+        std.log.debug("got packet {}", .{packet});
     }
 
     fn dequeueRead(self: *InternalQueues) ?Packet {
@@ -101,7 +102,6 @@ pub fn getReadPacket(self: *NetClient) ?Packet {
 }
 
 fn readThreadMain(client: *NetClient) !void {
-    std.log.info("read thread: {}", .{client.*});
     while (!client.shutdown) {
         var packet: Packet = .{};
         const n = try client.tcp.read(&packet.buf);
@@ -113,7 +113,6 @@ fn readThreadMain(client: *NetClient) !void {
 }
 
 fn readUdpThreadMain(client: *NetClient) !void {
-    std.log.info("read udp thread: {}", .{client.*});
     while (!client.shutdown) {
         var packet: Packet = .{};
         const n = try client.udp.reader().read(&packet.buf);
@@ -125,7 +124,6 @@ fn readUdpThreadMain(client: *NetClient) !void {
 }
 
 fn writeThreadMain(client: *NetClient) !void {
-    std.log.info("write thread: {}", .{client.*});
     while (!client.shutdown) {
         client.queues.write_queue_mtx.lock();
         var maybe_packet: ?Packet = null;

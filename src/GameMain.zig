@@ -115,22 +115,9 @@ pub fn main() anyerror!void {
 
     var last_ball_pos: Pos = .{};
 
-    var time = std.time.milliTimestamp();
-
     const ball_speed = 6;
 
     while (context.is_open) {
-        var now = std.time.milliTimestamp();
-        if (now - time > 1000) {
-            // send side packet back via udp, which starts up udp if it hasn't yet
-            // TODO: this cannot(!) get lost, or UDP will be dead
-            if (host) {
-                try net.writePacket(Packet.makeUnreliableWithPriority(.Side, [1]u8{'L'}, 10));
-            } else {
-                try net.writePacket(Packet.makeUnreliableWithPriority(.Side, [1]u8{'R'}, 10));
-            }
-            time = now;
-        }
         context.processEvents();
         context.renderClear();
         if (context.is_down_pressed) {
