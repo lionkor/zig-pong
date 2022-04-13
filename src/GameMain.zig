@@ -13,6 +13,11 @@ const Pos = struct {
 const GamePacket = Packet(PacketType, 16);
 const GameNetClient = NetClient(GamePacket);
 
+const Side = packed struct {
+    n: u32,
+    side: u8,
+};
+
 pub fn main() anyerror!void {
     var alloc = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
     var allocator = alloc.allocator();
@@ -28,17 +33,37 @@ pub fn main() anyerror!void {
 
     var net = try GameNetClient.init(allocator, args[1], port);
     try net.startThreads();
-    var side_packet: ?GamePacket = null;
-    while (side_packet == null) {
-        side_packet = net.getReadPacket();
+
+    // the side handshake!
+    // the second client sends the first client a suggested side
+    var got_side = false;
+    var side: u8 = 0;
+    var first_try = true;
+    while (!got_side) {
+        var side_packet = net.getReadPacket();
+        std.log.debug("{}", .{side_packet});
+        if (side_packet != null) {
+            if (!side_packet.?.is(.Side)) {
+                std.log.warn("expected {} packet, got {} instead", .{ .Side, side_packet.?.getType() });
+            } else {
+                side = side_packet.?.get(u8);
+                got_side = true;
+                try net.writePacket(GamePacket.makeReliable(.Side, @as(u8, 'R')));
+                std.log.debug("got packet for side {}, sending side {}", .{ side, 'R' });
+            }
+        } else {
+            if (first_try) {
+                try net.writePacket(GamePacket.makeReliable(.Side, @as(u8, 'L')));
+                std.log.debug("sending first-time side packet", .{});
+                first_try = false;
+            }
+            // sleep 0.5s
+            std.time.sleep(std.time.ns_per_ms * 500);
+            std.log.debug("waiting...", .{});
+        }
     }
-    if (!side_packet.?.is(.Side)) {
-        std.log.err("invalid packet, expected side packet!", .{});
-        std.process.exit(1);
-    }
-    const side = side_packet.?.get([1]u8)[0];
-    const host = side == 'L'; // left player is physics host
-    std.log.info("server told us that we're side '{c}'", .{side});
+
+    var host = side == 'L';
 
     var context = try SDLContext.init();
     defer context.deinit();
@@ -57,8 +82,6 @@ pub fn main() anyerror!void {
             .b = 0xff,
         },
     };
-
-    _ = host;
 
     var player2: SDLContext.Rect = .{
         .x = SDLContext.WIDTH - 15 - 10,

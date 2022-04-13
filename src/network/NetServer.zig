@@ -6,6 +6,7 @@ pub fn NetServer(comptime PacketT: type) type {
         const Self = @This();
         fn packetPrioCompare(context: void, a: PacketT, b: PacketT) std.math.Order {
             _ = context;
+            std.log.debug("{} vs {}", .{ a, b });
             return std.math.order(a.prio, b.prio);
         }
 
@@ -16,6 +17,7 @@ pub fn NetServer(comptime PacketT: type) type {
             send_queue_cnd: std.Thread.Condition,
             read_thread: std.Thread,
             write_thread: std.Thread,
+            dead: bool = false,
 
             end_point: ?network.EndPoint = null,
 
@@ -40,15 +42,18 @@ pub fn NetServer(comptime PacketT: type) type {
             pub fn pushSendPacket(self: *Client, packet: PacketT) !void {
                 self.send_queue_mtx.lock();
                 defer self.send_queue_mtx.unlock();
-                defer self.send_queue_cnd.signal();
                 try self.send_queue.add(packet);
+                std.log.debug("pushed {}, count is now {}", .{ packet, self.send_queue.count() });
+                defer self.send_queue_cnd.signal();
             }
 
             pub fn waitAndGetNextSendPacket(self: *Client) ?PacketT {
                 self.send_queue_mtx.lock();
+                self.send_queue_cnd.wait(&self.send_queue_mtx); // CONTINUE
                 defer self.send_queue_mtx.unlock();
-                self.send_queue_cnd.wait(&self.send_queue_mtx);
+                std.log.debug("queue has {}", .{self.send_queue.count()});
                 var node = self.send_queue.removeOrNull();
+                std.log.debug("popped {}", .{node});
                 if (node == null) {
                     return null;
                 } else {
@@ -68,13 +73,6 @@ pub fn NetServer(comptime PacketT: type) type {
             }
         };
 
-        pub const EventType = enum(usize) {
-            Connected,
-        };
-
-        pub const EventHandler = fn (*Client) void;
-        const EventTypeCount = @typeInfo(EventType).Enum.fields.len;
-        const EventHandlerArray = [EventTypeCount]?EventHandler;
         const ClientList = std.SinglyLinkedList(Client);
 
         allocator: std.mem.Allocator,
@@ -83,30 +81,9 @@ pub fn NetServer(comptime PacketT: type) type {
         udp_thread: std.Thread,
         clients: ClientList,
         endpoints: std.ArrayList(network.EndPoint),
-        event_handlers: EventHandlerArray = .{null},
         endpoints_mtx: std.Thread.Mutex = .{},
         clients_mtx: std.Thread.Mutex = .{},
         shutdown: bool = false,
-        event_handlers_mtx: std.Thread.Mutex = .{},
-
-        pub fn addEventHandler(self: *Self, evtype: EventType, evhandler: EventHandler) void {
-            self.event_handlers_mtx.lock();
-            defer self.event_handlers_mtx.unlock();
-            self.event_handlers[@enumToInt(evtype)] = evhandler;
-            std.log.debug("set event handler for {} to {}", .{ evtype, evhandler });
-        }
-
-        pub fn callEventHandlers(self: *Self, evtype: EventType, client: *Client) void {
-            self.event_handlers_mtx.lock();
-            defer self.event_handlers_mtx.unlock();
-            var func = self.event_handlers[@enumToInt(evtype)];
-            if (func != null) {
-                std.log.debug("calling event handler {} for {}", .{ func, evtype });
-                func.?(client);
-            } else {
-                std.log.warn("no event handler found for {}", .{evtype});
-            }
-        }
 
         fn addClient(self: *Self, client: Client) !*Client {
             var node: *ClientList.Node = try self.allocator.create(ClientList.Node);
@@ -116,6 +93,19 @@ pub fn NetServer(comptime PacketT: type) type {
             self.clients.prepend(node);
             std.log.debug("adding new client {}", .{client.tcp.getRemoteEndPoint()});
             return &node.data;
+        }
+
+        fn removeDeadClients(self: *Self) void {
+            self.clients_mtx.lock();
+            defer self.clients_mtx.unlock();
+            var next = self.clients.first;
+            while (next != null) {
+                var node: *ClientList.Node = next.?;
+                next = node.next;
+                if (node.data.dead) {
+                    self.clients.remove(node);
+                }
+            }
         }
 
         pub fn init(allocator: std.mem.Allocator, tcp_port: u16, udp_port: u16) !Self {
@@ -178,36 +168,54 @@ pub fn NetServer(comptime PacketT: type) type {
             var next = self.clients.first;
             while (next != null) {
                 var client = next.?.data;
-                if (client.tcp.endpoint.?.address.eql(ignore_client.tcp.endpoint.?.address)) {
+                const cep: ?network.EndPoint = client.tcp.getRemoteEndPoint() catch null;
+                const iep: ?network.EndPoint = ignore_client.tcp.getRemoteEndPoint() catch null;
+                if (cep != null and iep != null and
+                    cep.?.address.eql(iep.?.address) and
+                    cep.?.port == iep.?.port)
+                {
                     // not sending to "ignore"
                 } else {
                     client.pushSendPacket(packet) catch unreachable;
+                    std.log.debug("enqueueing {} on {}", .{ packet, ignore_client.tcp.getRemoteEndPoint() });
                 }
                 next = next.?.next;
             }
         }
 
         fn tcpWriteThread(server: *Self, client: *Client) void {
-            server.callEventHandlers(.Connected, client);
-            while (!server.shutdown) {
-                while (client.getNextSendPacket()) |packet_to_send| {
-                    client.writePacket(packet_to_send) catch {
-                        std.log.err("failed to send {} to {}", .{ packet_to_send, client.tcp.getRemoteEndPoint() });
+            std.log.info("write thread for {} started", .{client.tcp.getRemoteEndPoint()});
+            while (!client.dead and !server.shutdown) {
+                if (client.waitAndGetNextSendPacket()) |first_packet_to_send| {
+                    std.log.debug("{} <- packet", .{client.tcp.getRemoteEndPoint()});
+                    client.writePacket(first_packet_to_send) catch {
+                        std.log.err("failed to send {} to {}", .{ first_packet_to_send, client.tcp.getRemoteEndPoint() });
+                        client.dead = true;
+                        break;
                     };
+                } else {
+                    std.log.debug("woken up, but no packet available", .{});
                 }
             }
+            std.log.info("write thread for {} terminated", .{client.tcp.getRemoteEndPoint()});
+            server.removeDeadClients();
         }
 
         fn tcpReadThread(server: *Self, client: *Client) void {
-            while (!server.shutdown) {
+            std.log.info("read thread for {} started", .{client.tcp.getRemoteEndPoint()});
+            while (!client.dead and !server.shutdown) {
                 var packet: PacketT = client.readPacketTcp() catch {
                     std.log.err("failed to recv from {}", .{client.tcp.getRemoteEndPoint()});
+                    client.dead = true;
                     break;
                 };
+                std.log.debug("packet -> {}", .{client.tcp.getRemoteEndPoint()});
                 server.clients_mtx.lock();
                 server.enqueueForAllUnsafe(packet, client);
                 server.clients_mtx.unlock();
             }
+            std.log.info("read thread for {} terminated", .{client.tcp.getRemoteEndPoint()});
+            server.removeDeadClients();
         }
 
         fn udpThread(server: *Self) !void {
