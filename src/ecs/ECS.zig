@@ -134,6 +134,19 @@ pub fn ECS(comptime CompTypeT: type, comptime CompT: type) type {
             return comps;
         }
 
+        pub fn forEachComponent(self: *Self, comptype: CompTypeT, func: fn (*CompT) void) void {
+            if (!self.isUniqueLocked()) unreachable;
+            for (self.comps.get(comptype)) |comp| {
+                func(&comp);
+            }
+        }
+        pub fn forEachComponentReadonly(self: *const Self, comptype: CompTypeT, func: fn (*const CompT) void) void {
+            if (!self.isAnyLocked()) unreachable;
+            for (self.comps.get(comptype)) |comp| {
+                func(&comp);
+            }
+        }
+
         pub fn freeComponentsView(self: *Self, array: []*CompT) void {
             self.allocator.free(array);
         }
