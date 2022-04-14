@@ -5,6 +5,16 @@ const NetClient = @import("network/NetClient.zig").NetClient;
 const Packet = @import("network/Packet.zig").Packet;
 const PacketType = @import("PacketType.zig").PacketType;
 
+const CompType = enum {
+    Transform,
+};
+
+const Comp = struct {
+    fuck: usize = 5,
+};
+
+const Ecs = @import("ecs/ECS.zig").ECS(CompType, Comp);
+
 const Pos = struct {
     x: i32 = 0,
     y: i32 = 0,
@@ -30,6 +40,18 @@ pub fn main() anyerror!void {
         std.process.exit(1);
     }
     var port = try std.fmt.parseUnsigned(u16, args[2], 10);
+
+    var ecs = Ecs.init(allocator);
+    ecs.lockUnique();
+    var entity = try ecs.addEntity();
+    var comp = try ecs.addComponent(entity, .Transform, .{});
+    comp.fuck = 3;
+    ecs.unlockUnique();
+    std.log.debug("comp: {}", .{comp});
+    ecs.lockShared();
+    var comps: ?[]*Comp = try ecs.getComponents(entity, .Transform);
+    ecs.unlockShared();
+    std.log.debug("all comps of this entity: {any}", .{comps.?[0..comps.?.len]});
 
     var net = try GameNetClient.init(allocator, args[1], port);
     try net.startThreads();
