@@ -53,7 +53,7 @@ pub const Color = struct {
     }
 };
 
-pub fn drawRect(self: *SDLContext, rect: *Rect) void {
+pub fn drawRect(self: *SDLContext, rect: *const Rect) void {
     _ = sdl2.SDL_SetRenderDrawColor(self.renderer, rect.color.r, rect.color.g, rect.color.b, 255);
     var sdl_rect: sdl2.SDL_Rect = undefined;
     sdl_rect.x = rect.x;

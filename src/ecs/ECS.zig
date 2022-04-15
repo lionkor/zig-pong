@@ -1,11 +1,18 @@
 const std = @import("std");
 
+// this ECS sets the following parameters:
+// - each entity may only have one of each type of component.
+//   if more than one is needed, an aggregate component should be
+//   implemented. Example: "I need multiple `ScriptComponent`s!"
+//   Solution: one "ScriptArrayComponent", or similar
+// - the amount of unique component types is not limited by this
+//   implementation
+
 fn EntityImpl(comptime CompTypeT: type) type {
     return struct {
         const Self = @This();
         // indices into ECS.comps[comptype][]
-        const CompList = std.ArrayList(usize);
-        const CompCollection = std.AutoHashMap(CompTypeT, CompList);
+        const CompCollection = std.AutoHashMap(CompTypeT, usize);
 
         // uniquely identifies this entity
         // index into ECS.entities[]
@@ -31,12 +38,12 @@ fn EntityImpl(comptime CompTypeT: type) type {
             self.comps.deinit();
         }
 
-        pub fn addComponent(self: *Self, comptype: CompTypeT, index: usize) !void {
+        pub fn addOrReplaceComponent(self: *Self, comptype: CompTypeT, index: usize) !void {
             var res = try self.comps.getOrPut(comptype);
-            if (!res.found_existing) {
-                res.value_ptr.* = try CompList.initCapacity(self.allocator, 5); // TODO: Adjust this
+            if (res.found_existing) {
+                std.log.warn("replacing component type {} on {}!", .{ comptype, self.id });
             }
-            try res.value_ptr.append(index);
+            res.value_ptr.* = index;
         }
     };
 }
@@ -104,34 +111,28 @@ pub fn ECS(comptime CompTypeT: type, comptime CompT: type) type {
             return self.is_unique_locked;
         }
 
-        // will return array of pointers which may be invalidated on the next call to any ECS function
-        // you need to free this yourself
-        pub fn getComponents(self: *Self, entity_id: EntityId, comptype: CompTypeT) !?[]*CompT {
+        pub fn getComponent(self: *Self, entity_id: EntityId, comptype: CompTypeT) ?*CompT {
             if (!self.isAnyLocked()) unreachable;
-            // count comps for this query
-            if (entity_id.index > self.entities.items.len) {
-                return error.EntityNotFound;
-            }
             var entity: *Entity = &(self.entities.items[entity_id.index]);
-            var maybe_comp_ids = entity.comps.get(comptype);
-            if (maybe_comp_ids == null) {
-                std.log.debug("tried to get components for entity {} with type '{}', but that type does not exist", .{ entity_id, comptype });
-                return null;
+            var comps = self.comps.get(comptype);
+            var comp_id = entity.comps.get(comptype);
+            if (comps != null and comp_id != null) {
+                return &comps.?.items[comp_id.?];
             }
-            var comp_ids = maybe_comp_ids.?.items;
-            var maybe_comps = self.comps.get(comptype);
-            if (maybe_comps == null) {
-                std.log.debug("tried to get components for entity {} with type '{}', but didn't find any for this entity", .{ entity_id, comptype });
-                return null;
+            return null;
+        }
+
+        pub fn isValidEntity(self: *Self, entity_id: EntityId) bool {
+            return entity_id.index > self.entities.items.len;
+        }
+
+        pub fn getAllComponentsOfType(self: *Self, comptype: CompTypeT) []CompT {
+            const maybe_comps = self.comps.get(comptype);
+            if (maybe_comps) |comps| {
+                return comps.items;
+            } else {
+                return &[_]CompT{};
             }
-            std.log.debug("gathering {} components of type '{}' for entity {}", .{ comp_ids.len, comptype, entity_id });
-            var comps: []*CompT = try self.allocator.alloc(*CompT, comp_ids.len);
-            var i: usize = 0;
-            for (comp_ids) |id| {
-                comps[i] = &maybe_comps.?.items[id];
-                i = i + 1;
-            }
-            return comps;
         }
 
         pub fn forEachComponent(self: *Self, comptype: CompTypeT, func: fn (*CompT) void) void {
@@ -140,15 +141,12 @@ pub fn ECS(comptime CompTypeT: type, comptime CompT: type) type {
                 func(&comp);
             }
         }
+
         pub fn forEachComponentReadonly(self: *const Self, comptype: CompTypeT, func: fn (*const CompT) void) void {
             if (!self.isAnyLocked()) unreachable;
             for (self.comps.get(comptype)) |comp| {
                 func(&comp);
             }
-        }
-
-        pub fn freeComponentsView(self: *Self, array: []*CompT) void {
-            self.allocator.free(array);
         }
 
         // requires unique lock
@@ -163,10 +161,10 @@ pub fn ECS(comptime CompTypeT: type, comptime CompT: type) type {
 
         // requires unique lock
         // will return pointer which may be invalidated on the next call to any ECS function
-        pub fn addComponent(self: *Self, entity_id: EntityId, comptype: CompTypeT, comp: CompT) anyerror!*CompT {
+        pub fn addOrReplaceComponent(self: *Self, entity_id: EntityId, comptype: CompTypeT, comp: CompT) anyerror!*CompT {
             if (!self.isUniqueLocked()) unreachable;
             // find the entity first, then make the component, then add it to the entity
-            if (entity_id.index > self.entities.items.len) {
+            if (self.isValidEntity(entity_id)) {
                 return error.EntityNotFound;
             }
             var entity: *Entity = &self.entities.items[entity_id.index];
@@ -176,7 +174,7 @@ pub fn ECS(comptime CompTypeT: type, comptime CompT: type) type {
             }
             var new_comp = try array.value_ptr.addOne();
             new_comp.* = comp;
-            try entity.addComponent(comptype, array.value_ptr.*.items.len - 1);
+            try entity.addOrReplaceComponent(comptype, array.value_ptr.*.items.len - 1);
             std.log.debug("added component {} of type {} to entity {}", .{ new_comp, comptype, entity.id });
             return new_comp;
         }

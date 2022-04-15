@@ -44,7 +44,7 @@ pub fn NetServer(comptime PacketT: type) type {
                 defer self.send_queue_mtx.unlock();
                 try self.send_queue.add(packet);
                 std.log.debug("pushed {}, count is now {}", .{ packet, self.send_queue.count() });
-                defer self.send_queue_cnd.signal();
+                self.send_queue_cnd.signal();
             }
 
             pub fn waitAndGetNextSendPacket(self: *Client) ?PacketT {
@@ -167,7 +167,7 @@ pub fn NetServer(comptime PacketT: type) type {
         fn enqueueForAllUnsafe(self: *Self, packet: PacketT, ignore_client: *Client) void {
             var next = self.clients.first;
             while (next != null) {
-                var client = next.?.data;
+                var client = &next.?.data;
                 const cep: ?network.EndPoint = client.tcp.getRemoteEndPoint() catch null;
                 const iep: ?network.EndPoint = ignore_client.tcp.getRemoteEndPoint() catch null;
                 if (cep != null and iep != null and
@@ -177,7 +177,7 @@ pub fn NetServer(comptime PacketT: type) type {
                     // not sending to "ignore"
                 } else {
                     client.pushSendPacket(packet) catch unreachable;
-                    std.log.debug("enqueueing {} on {}", .{ packet, ignore_client.tcp.getRemoteEndPoint() });
+                    std.log.debug("enqueued {} on {}", .{ packet, client.tcp.getRemoteEndPoint() });
                 }
                 next = next.?.next;
             }

@@ -4,16 +4,21 @@ const SDLContext = @import("game/SDLContext.zig");
 const NetClient = @import("network/NetClient.zig").NetClient;
 const Packet = @import("network/Packet.zig").Packet;
 const PacketType = @import("PacketType.zig").PacketType;
+const EntityId = @import("ecs/ECS.zig").EntityId;
+const Ecs = @import("ecs/ECS.zig").ECS(CompType, Comp);
 
 const CompType = enum {
-    Transform,
+    Rect,
+};
+
+const CompData = union {
+    rect: SDLContext.Rect,
 };
 
 const Comp = struct {
-    fuck: usize = 5,
+    entity_id: EntityId = .{ .index = 0 },
+    data: CompData,
 };
-
-const Ecs = @import("ecs/ECS.zig").ECS(CompType, Comp);
 
 const Pos = struct {
     x: i32 = 0,
@@ -42,46 +47,45 @@ pub fn main() anyerror!void {
     var port = try std.fmt.parseUnsigned(u16, args[2], 10);
 
     var ecs = Ecs.init(allocator);
-    ecs.lockUnique();
-    var entity = try ecs.addEntity();
-    var comp = try ecs.addComponent(entity, .Transform, .{});
-    comp.fuck = 3;
-    ecs.unlockUnique();
-    std.log.debug("comp: {}", .{comp});
-    ecs.lockShared();
-    var comps: ?[]*Comp = try ecs.getComponents(entity, .Transform);
-    ecs.unlockShared();
-    std.log.debug("all comps of this entity: {any}", .{comps.?[0..comps.?.len]});
 
     var net = try GameNetClient.init(allocator, args[1], port);
     try net.startThreads();
 
     // the side handshake!
-    // the second client sends the first client a suggested side
     var got_side = false;
     var side: u8 = 0;
-    var first_try = true;
+    // side handshake protocol:
+    // 1. send R
+    // 2. wait for a packet
+    // 3. either:
+    //    3.1 get L, so we start the game as L
+    //    3.2 get R, so we send L
+
+    // 1. send R
+    try net.writePacket(GamePacket.makeReliable(.Side, @as(u8, 'R')));
+    std.log.debug("sent R packet", .{});
     while (!got_side) {
-        var side_packet = net.getReadPacket();
-        std.log.debug("{}", .{side_packet});
-        if (side_packet != null) {
-            if (!side_packet.?.is(.Side)) {
-                std.log.warn("expected {} packet, got {} instead", .{ .Side, side_packet.?.getType() });
+        std.time.sleep(std.time.ns_per_s * 1);
+        // 2. wait for a packet
+        std.log.debug("waiting for a side packet", .{});
+        if (net.getReadPacket()) |packet| {
+            if (packet.is(.Side)) {
+                // 3.1 got L, so we start the game as L
+                if (packet.get(u8) == 'L') {
+                    std.log.debug("got L packet", .{});
+                    side = 'L';
+                    got_side = true;
+                } else if (packet.get(u8) == 'R') {
+                    try net.writePacket(GamePacket.makeReliable(.Side, @as(u8, 'L')));
+                    std.log.debug("sent L packet", .{});
+                    side = 'R';
+                    got_side = true;
+                } else {
+                    std.log.warn("got side packet with weird payload: {}", .{packet});
+                }
             } else {
-                side = side_packet.?.get(u8);
-                got_side = true;
-                try net.writePacket(GamePacket.makeReliable(.Side, @as(u8, 'R')));
-                std.log.debug("got packet for side {}, sending side {}", .{ side, 'R' });
+                std.log.warn("unexpected packet during handshake: {}", .{packet});
             }
-        } else {
-            if (first_try) {
-                try net.writePacket(GamePacket.makeReliable(.Side, @as(u8, 'L')));
-                std.log.debug("sending first-time side packet", .{});
-                first_try = false;
-            }
-            // sleep 0.5s
-            std.time.sleep(std.time.ns_per_ms * 500);
-            std.log.debug("waiting...", .{});
         }
     }
 
@@ -138,6 +142,24 @@ pub fn main() anyerror!void {
         .b = 0x00,
     };
 
+    ecs.lockUnique();
+    var e_player = try ecs.addEntity();
+    var comp_player = try ecs.addOrReplaceComponent(
+        e_player,
+        .Rect,
+        .{ .data = CompData{ .rect = this_player.* } },
+    );
+    comp_player.entity_id = e_player;
+
+    var e_opponent = try ecs.addEntity();
+    var comp_opponent = try ecs.addOrReplaceComponent(
+        e_opponent,
+        .Rect,
+        .{ .data = CompData{ .rect = other_player.* } },
+    );
+    comp_opponent.entity_id = e_opponent;
+    ecs.unlockUnique();
+
     var ball: SDLContext.Rect = .{
         .x = SDLContext.WIDTH / 2 - 5,
         .y = SDLContext.HEIGHT / 2 - 5,
@@ -171,13 +193,19 @@ pub fn main() anyerror!void {
     while (context.is_open) {
         context.processEvents();
         context.renderClear();
+
+        ecs.lockUnique();
         if (context.is_down_pressed) {
-            this_player.y = std.math.min(this_player.y + player_vel, SDLContext.HEIGHT - this_player.h);
-            try net.writePacket(GamePacket.makeUnreliableWithPriority(.PlayerPos, this_player.y, 1));
+            if (ecs.getComponent(e_player, .Rect)) |comp| {
+                comp.data.rect.y = std.math.min(comp.data.rect.y + player_vel, SDLContext.HEIGHT - comp.data.rect.h);
+                try net.writePacket(GamePacket.makeUnreliableWithPriority(.PlayerPos, comp.data.rect.y, 1));
+            }
         }
         if (context.is_up_pressed) {
-            this_player.y = std.math.max(this_player.y - player_vel, 0);
-            try net.writePacket(GamePacket.makeUnreliableWithPriority(.PlayerPos, this_player.y, 1));
+            if (ecs.getComponent(e_player, .Rect)) |comp| {
+                comp.data.rect.y = std.math.max(comp.data.rect.y - player_vel, 0);
+                try net.writePacket(GamePacket.makeUnreliableWithPriority(.PlayerPos, comp.data.rect.y, 1));
+            }
         }
 
         if (host) {
@@ -258,7 +286,9 @@ pub fn main() anyerror!void {
                     },
                     .PlayerPos => {
                         var pos: i32 = packet.get(i32);
-                        other_player.y = pos;
+                        if (ecs.getComponent(e_opponent, .Rect)) |comp| {
+                            comp.data.rect.y = pos;
+                        }
                     },
                     else => std.log.err("unexpected packet type: {}", .{packet}),
                 }
@@ -266,8 +296,12 @@ pub fn main() anyerror!void {
                 break;
             }
         }
-        context.drawRect(&player1);
-        context.drawRect(&player2);
+        ecs.unlockUnique();
+
+        for (ecs.getAllComponentsOfType(.Rect)) |comp| {
+            context.drawRect(&comp.data.rect);
+        }
+
         context.drawRect(&ball);
         context.renderPresent();
     }
